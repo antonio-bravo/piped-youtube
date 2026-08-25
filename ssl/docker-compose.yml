@@ -1,95 +1,91 @@
 services:
 
+  certs-generator:
+    image: alpine/openssl
+    container_name: piped-certs-generator
+    user: "0:0"
+    volumes:
+      - /share/Container/piped/config:/certs
+    entrypoint: sh -c "if [ ! -f /certs/piped.crt ]; then echo 'Generando certificado...'; openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -keyout /certs/piped.key -out /certs/piped.crt -subj '/CN=piped.home/O=Piped Local/C=ES' -addext 'subjectAltName = DNS:piped.home, DNS:pipedapi.home, DNS:pipedproxy.home'; chmod 644 /certs/piped.crt /certs/piped.key; echo '¡Certificado generado con éxito!'; else echo 'El certificado SSL ya existe. Saltando paso.'; fi"
+
   postgres:
     image: postgres:15-alpine
     container_name: piped-postgres
     restart: unless-stopped
-
     environment:
       POSTGRES_DB: piped
       POSTGRES_USER: piped
       POSTGRES_PASSWORD: Piped-QNAP-xxxx-ChangeMe
-
     volumes:
       - /share/Container/piped/data/postgres:/var/lib/postgresql/data
-
     networks:
       - piped
-
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U piped -d piped"]
       interval: 10s
       timeout: 5s
       retries: 10
 
-
   piped-backend:
     image: 1337kavin/piped:latest
     container_name: piped-backend
     restart: unless-stopped
-
     depends_on:
       postgres:
         condition: service_healthy
-
     volumes:
       - /share/Container/piped/config/config.properties:/app/config.properties:ro
-
     networks:
       - piped
-
 
   piped-proxy:
     image: 1337kavin/piped-proxy:latest
     container_name: piped-proxy
     restart: unless-stopped
-
     environment:
       UDS: "0"
-
     networks:
       - piped
-
 
   piped-frontend:
     image: 1337kavin/piped-frontend:latest
     container_name: piped-frontend
     restart: unless-stopped
-
     environment:
       BACKEND_HOSTNAME: pipedapi.home:18080
-      HTTP_MODE: http
-
+      HTTP_MODE: https
     depends_on:
       - piped-backend
-
     networks:
       - piped
-
 
   nginx:
     image: nginx:mainline-alpine
     container_name: piped-nginx
     restart: unless-stopped
-
     depends_on:
-      - piped-backend
-      - piped-proxy
-      - piped-frontend
-
+      certs-generator:
+        condition: service_completed_successfully
+      piped-backend:
+        condition: service_started
+      piped-proxy:
+        condition: service_started
+      piped-frontend:
+        condition: service_started
     ports:
-      - "18080:80"
-
+      - "18080:443"
     volumes:
       - /share/Container/piped/config/nginx.conf:/etc/nginx/nginx.conf:ro
       - /share/Container/piped/config/pipedfrontend.conf:/etc/nginx/conf.d/pipedfrontend.conf:ro
       - /share/Container/piped/config/pipedapi.conf:/etc/nginx/conf.d/pipedapi.conf:ro
       - /share/Container/piped/config/pipedproxy.conf:/etc/nginx/conf.d/pipedproxy.conf:ro
       - /share/Container/piped/config/ytproxy.conf:/etc/nginx/snippets/ytproxy.conf:ro
-
+      # Mapeamos la carpeta entera para evitar conflictos de archivos no creados
+      - /share/Container/piped/config:/etc/ssl/certs-custom:ro
+      #- /share/Container/piped/config/piped.crt:/etc/ssl/certs/piped.crt:ro
+      #- /share/Container/piped/config/piped.key:/etc/ssl/private/piped.key:ro
     networks:
       - piped
-
 
 networks:
   piped:

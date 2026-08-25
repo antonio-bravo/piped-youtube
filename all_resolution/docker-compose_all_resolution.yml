@@ -1,0 +1,173 @@
+services:
+
+  # ==========================================================
+  # POSTGRESQL
+  # ==========================================================
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: piped-postgres
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: piped
+      POSTGRES_USER: piped
+      POSTGRES_PASSWORD: Piped-QNAP-xxxx-ChangeMe
+
+    volumes:
+      - /share/Container/piped/data/postgres:/var/lib/postgresql/data
+
+    networks:
+      - piped
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U piped -d piped"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+
+  # ==========================================================
+  # BGUTIL - YouTube PO Token Provider
+  # ==========================================================
+
+  piped-bgutil:
+    image: brainicism/bgutil-ytdlp-pot-provider:1.3.1
+    container_name: piped-bgutil
+    restart: unless-stopped
+
+    networks:
+      - piped
+
+
+  # ==========================================================
+  # PIPED RESOLVER
+  # yt-dlp + BGUTIL
+  # ==========================================================
+
+  piped-resolver:
+    image: ghcr.io/antonio-bravo/piped-youtube/piped-resolver:latest
+    container_name: piped-resolver
+    restart: unless-stopped
+
+    environment:
+      RESOLVER_HOST: "0.0.0.0"
+      RESOLVER_PORT: "8000"
+
+      # IMPORTANTE:
+      # El resolver Python utiliza PROXY_URL, NO
+      # PIPED_RESOLVER_PROXY_URL.
+      #
+      # Esta URL debe ser accesible desde el navegador
+      # que utiliza Piped.
+      PROXY_URL: "http://pipedproxy.home:18080"
+
+      # Configuración del resolver
+      CACHE_TTL: "3600"
+      CACHE_MAXSIZE: "512"
+      ALLOWED_ORIGINS: "*"
+
+      # BGUTIL HTTP POT provider
+      BGUTIL_BASE_URL: "http://piped-bgutil:4416"
+
+    depends_on:
+      - piped-bgutil
+      - piped-proxy
+
+    networks:
+      - piped
+
+
+  # ==========================================================
+  # PIPED BACKEND
+  # ==========================================================
+
+  piped-backend:
+    image: 1337kavin/piped:latest
+    container_name: piped-backend
+    restart: unless-stopped
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    volumes:
+      - /share/Container/piped/config/config.properties:/app/config.properties:ro
+
+    networks:
+      - piped
+
+
+  # ==========================================================
+  # PIPED PROXY
+  # ==========================================================
+
+  piped-proxy:
+    image: 1337kavin/piped-proxy:latest
+    container_name: piped-proxy
+    restart: unless-stopped
+
+    environment:
+      UDS: "0"
+
+    networks:
+      - piped
+
+
+  # ==========================================================
+  # PIPED FRONTEND
+  # ==========================================================
+
+  piped-frontend:
+    image: 1337kavin/piped-frontend:latest
+    container_name: piped-frontend
+    restart: unless-stopped
+
+    environment:
+      BACKEND_HOSTNAME: "pipedapi.home:18080"
+      HTTP_MODE: "http"
+
+    depends_on:
+      - piped-backend
+
+    networks:
+      - piped
+
+
+  # ==========================================================
+  # NGINX
+  # ==========================================================
+
+  nginx:
+    image: nginx:mainline-alpine
+    container_name: piped-nginx
+    restart: unless-stopped
+
+    depends_on:
+      - piped-backend
+      - piped-resolver
+      - piped-proxy
+      - piped-frontend
+
+    ports:
+      - "18080:80"
+
+    volumes:
+      - /share/Container/piped/config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /share/Container/piped/config/pipedfrontend.conf:/etc/nginx/conf.d/pipedfrontend.conf:ro
+      - /share/Container/piped/config/pipedapi.conf:/etc/nginx/conf.d/pipedapi.conf:ro
+      - /share/Container/piped/config/pipedproxy.conf:/etc/nginx/conf.d/pipedproxy.conf:ro
+      - /share/Container/piped/config/ytproxy.conf:/etc/nginx/snippets/ytproxy.conf:ro
+
+    networks:
+      - piped
+
+
+# ==========================================================
+# NETWORK
+# ==========================================================
+
+networks:
+  piped:
+    name: piped
+    driver: bridge
