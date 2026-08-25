@@ -1,0 +1,318 @@
+# ==============================================================================
+# PIPED MODULE - DOCKER COMPOSE
+# ==============================================================================
+# Description: Piped backend, frontend, ytproxy, bg-helper, and module-local Postgres
+# Author: Matt Barham
+# Created: 2026-04-25
+# Modified: 2026-04-25
+# Version: 1.0.0
+# Host: Your Server
+# ==============================================================================
+# Component: module: piped
+# Config Sources: base.env + .env.example + modules.yml overrides → .env (generated)
+# Security: non-root where possible, secrets via /run/secrets/, caps dropped
+# ==============================================================================
+# Container Images:
+#   See modules/piped/.env.example for complete image paths and versions
+#   (PIPED_IMAGE, PIPED_FRONTEND_IMAGE, PIPED_PROXY_IMAGE,
+#    PIPED_BG_HELPER_IMAGE, PIPED_POSTGRES_IMAGE)
+# Documentation:
+#   - Piped-Backend: https://github.com/TeamPiped/Piped-Backend
+#   - Piped-Frontend: https://github.com/TeamPiped/Piped
+#   - Piped-Proxy: https://github.com/TeamPiped/piped-proxy
+#   - bg-helper: https://github.com/TeamPiped/bg-helper-server
+#   - Self-host docs: https://docs.piped.video/docs/self-hosting/
+# Networks:
+#   - troxy (192.168.35.0/24) - main application network
+# Dependencies:
+#   - Hub: traefik (routing)
+# External Integrations:
+#   - [x] Traefik routing (3 subdomains: frontend, API, ytproxy)
+#   - [ ] Authentik forward auth (Piped is public-facing by design)
+# ==============================================================================
+
+name: spoke-piped
+
+############################ EXTENSIONS
+
+x-ssl: &ssl
+  environment:
+    - SSL_CERT_FILE=${SSL_CERT_FILE}
+    - REQUESTS_CA_BUNDLE=${REQUESTS_CA_BUNDLE}
+    - CURL_CA_BUNDLE=${CURL_CA_BUNDLE}
+
+  volumes:
+    - ${CA_CERT}:/etc/ssl/certs/ca-certificates.crt:ro
+
+x-logging-small: &log_small
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "2"
+
+############################ NETWORKS
+
+networks:
+  troxy:
+    external: true
+
+############################# SECRETS
+
+secrets:
+  piped_postgres_password:
+    file: ${SECRETS_DIR}/piped/piped_postgres_password
+  piped_proxy_hash_secret:
+    file: ${SECRETS_DIR}/piped/piped_proxy_hash_secret
+
+############################# SERVICES
+
+services:
+  #======================================
+  # PIPED-POSTGRES - Module-local Postgres for Piped
+  #======================================
+  piped-postgres:
+    <<: [*log_small]
+    image: ${PIPED_POSTGRES_IMAGE}
+    hostname: piped-postgres
+    container_name: piped-postgres
+    restart: on-failure
+    init: true
+
+    security_opt:
+      - no-new-privileges=true
+    mem_limit: 1G
+    cpus: 1.0
+
+    networks:
+      troxy:
+        ipv4_address: ${PIPED_POSTGRES_IP}
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PIPED_POSTGRES_USER} -d ${PIPED_POSTGRES_DB}"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+    environment:
+      - TZ=${TZ}
+      - POSTGRES_DB=${PIPED_POSTGRES_DB}
+      - POSTGRES_USER=${PIPED_POSTGRES_USER}
+      - POSTGRES_PASSWORD_FILE=/run/secrets/piped_postgres_password
+
+    volumes:
+      - ${PIPED_DIR}/postgres/:/var/lib/postgresql/data/:rw
+      - ${LOCALTIME}:/etc/localtime:ro
+
+    secrets:
+      - piped_postgres_password
+
+  #======================================
+  # PIPED-BACKEND - Piped API (Java)
+  #======================================
+  piped-backend:
+    <<: [*ssl, *log_small]
+    image: ${PIPED_IMAGE}
+    hostname: piped-backend
+    container_name: piped-backend
+    restart: on-failure
+    init: true
+
+    depends_on:
+      piped-postgres:
+        condition: service_healthy
+
+    security_opt:
+      - no-new-privileges=true
+    mem_limit: 2G
+    cpus: 2.0
+
+    networks:
+      troxy:
+        ipv4_address: ${PIPED_BACKEND_IP}
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+    environment:
+      - TZ=${TZ}
+
+    volumes:
+      - ${PIPED_DIR}/config/config.properties:/app/config.properties:ro
+      - ${LOCALTIME}:/etc/localtime:ro
+
+  #======================================
+  # PIPED-FRONTEND - Piped Web UI (static)
+  #======================================
+  piped-frontend:
+    <<: [*log_small]
+    image: ${PIPED_FRONTEND_IMAGE}
+    hostname: piped-frontend
+    container_name: piped-frontend
+    restart: on-failure
+    init: true
+
+    depends_on:
+      - piped-backend
+
+    security_opt:
+      - no-new-privileges=true
+    mem_limit: 256M
+    cpus: 0.5
+
+    networks:
+      troxy:
+        ipv4_address: ${PIPED_FRONTEND_IP}
+
+    environment:
+      - TZ=${TZ}
+      - BACKEND_HOSTNAME=${PIPED_API_SUBDOMAIN}.${DOMAIN}
+      - HTTP_MODE=https
+
+    volumes:
+      - ${LOCALTIME}:/etc/localtime:ro
+
+  #======================================
+  # PIPED-PROXY - YouTube media proxy (Rust)
+  #======================================
+  piped-proxy:
+    <<: [*log_small]
+    image: ${PIPED_PROXY_IMAGE}
+    hostname: piped-proxy
+    container_name: piped-proxy
+    restart: on-failure
+    init: true
+
+    # piped-proxy reads HASH_SECRET from the env var only (no _FILE support).
+    # Export it from the mounted secret before launching so signed (qhash)
+    # mode is actually enforced; $$ escapes compose interpolation.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - export HASH_SECRET="$$(cat "$$HASH_SECRET_FILE")"; exec /app/piped-proxy
+
+    security_opt:
+      - no-new-privileges=true
+    mem_limit: 1G
+    cpus: 2.0
+
+    networks:
+      troxy:
+        ipv4_address: ${PIPED_PROXY_IP}
+
+    environment:
+      - TZ=${TZ}
+      - UDS=0
+      - HASH_SECRET_FILE=/run/secrets/piped_proxy_hash_secret
+
+    volumes:
+      - ${LOCALTIME}:/etc/localtime:ro
+
+    secrets:
+      - piped_proxy_hash_secret
+
+  #======================================
+  # PIPED-BG-HELPER - PoToken provider for backend
+  #======================================
+  piped-bg-helper:
+    <<: [*log_small]
+    image: ${PIPED_BG_HELPER_IMAGE}
+    hostname: piped-bg-helper
+    container_name: piped-bg-helper
+    restart: on-failure
+    init: true
+
+    security_opt:
+      - no-new-privileges=true
+    mem_limit: 512M
+    cpus: 0.5
+
+    networks:
+      troxy:
+        ipv4_address: ${PIPED_BG_HELPER_IP}
+
+    environment:
+      - TZ=${TZ}
+
+    volumes:
+      - ${LOCALTIME}:/etc/localtime:ro
+
+  #======================================
+  # PIPED-RESOLVER - yt-dlp adaptive resolver (serves tubeapi /streams)
+  #======================================
+  piped-resolver:
+    <<: [*ssl, *log_small]
+    image: ${PIPED_RESOLVER_IMAGE}
+    build:
+      context: ./resolver
+    hostname: piped-resolver
+    container_name: piped-resolver
+    restart: on-failure
+    init: true
+
+    depends_on:
+      - piped-bgutil
+
+    security_opt:
+      - no-new-privileges=true
+    mem_limit: 1G
+    cpus: 2.0
+
+    networks:
+      troxy:
+        ipv4_address: ${PIPED_RESOLVER_IP}
+
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthcheck',timeout=5).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+    environment:
+      - TZ=${TZ}
+      - RESOLVER_HOST=0.0.0.0
+      - RESOLVER_PORT=8000
+      - BGUTIL_BASE_URL=http://piped-bgutil:4416
+      - YTDLP_PLAYER_CLIENTS=${PIPED_RESOLVER_PLAYER_CLIENTS}
+      - PROXY_URL=${PIPED_RESOLVER_PROXY_URL}
+      - PROXY_HASH_SECRET_FILE=/run/secrets/piped_proxy_hash_secret
+      - CACHE_TTL=${PIPED_RESOLVER_CACHE_TTL}
+      - SEARCH_LIMIT=${PIPED_RESOLVER_SEARCH_LIMIT}
+      - ALLOWED_ORIGINS=${PIPED_RESOLVER_ALLOWED_ORIGINS}
+
+    volumes:
+      - ${LOCALTIME}:/etc/localtime:ro
+
+    secrets:
+      - piped_proxy_hash_secret
+
+  #======================================
+  # PIPED-BGUTIL - bgutil POT provider for the resolver (internal only)
+  #======================================
+  piped-bgutil:
+    <<: [*log_small]
+    image: ${PIPED_BGUTIL_IMAGE}
+    hostname: piped-bgutil
+    container_name: piped-bgutil
+    restart: on-failure
+    init: true
+
+    security_opt:
+      - no-new-privileges=true
+    mem_limit: 512M
+    cpus: 1.0
+
+    networks:
+      troxy:
+        ipv4_address: ${PIPED_BGUTIL_IP}
+
+    environment:
+      - TZ=${TZ}
+
+    volumes:
+      - ${LOCALTIME}:/etc/localtime:ro
