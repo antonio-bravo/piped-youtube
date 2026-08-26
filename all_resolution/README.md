@@ -999,6 +999,50 @@ porque contiene los datos persistentes.
 
 ---
 
+## 28. Estado actual, qué funciona, qué no, y por qué
+
+Última revisión: 2026-08-26.
+
+### Qué funciona
+
+- Selección de resolución en vídeos normales (VOD): el resolver + BGUTIL consiguen PO Tokens y devuelven varios itags de vídeo (144p a 1080p+) y varios de audio, algo que el stack de la raíz (`docker-compose.yml`, sin resolver ni PO Token provider) no puede ofrecer de forma fiable.
+- Extracción de `videoStreams`/`audioStreams` vía `piped-resolver` (`/streams/{id}`) confirmada con `curl` y con reproducción real (respuestas `206 Partial Content` desde `googlevideo`).
+- Directos (livestreams): soportados desde que se añadió el relleno de `hls` en `mapping.py` (solo cuando `is_live=true`) y el endpoint `/relay` que reescribe las URIs internas de los `.m3u8` para que pasen por el proxy.
+
+### Qué NO funciona (confirmado por el usuario, 2026-08-26)
+
+- **No todos los vídeos VOD funcionan.** Con el resolver activo, algunos vídeos fallan a pesar de que la arquitectura en general es correcta. No se ha aislado aún el patrón exacto (idioma, canal, tipo de formato disponible, etc.) — pendiente de diagnóstico con logs concretos del resolver cuando falle un vídeo puntual.
+- **Los directos (lives) tampoco funcionan bien**, pese a los fixes de HLS/`/relay`/CORS ya aplicados. Puede haber casos no cubiertos en la reescritura recursiva de sub-playlists/segmentos, o el propio PO Token/cliente usado por yt-dlp no sirviendo manifiestos de directos de forma consistente. Pendiente de diagnóstico adicional.
+- **Los vídeos largos (VOD) se cortan a mitad de reproducción** (spinner infinito / se para). Esto ocurre en ambos stacks (raíz y `all_resolution`), ver causa raíz abajo.
+
+### Causa raíz confirmada del corte en vídeos largos: problema de red/IP, no de configuración
+
+- Se confirmó con el usuario un **403 Forbidden** desde `pipedproxy.home:18080/videoplayback` a mitad de reproducción, con el parámetro `expire` de la URL todavía vigente (no es un token caducado).
+- El NAS/servidor está detrás de VPS/túnel/CGNAT. YouTube bloquea por **reputación de IP** (datacenter/no residencial) al detectar una descarga sostenida con patrón de bot, independientemente de que el token siga siendo válido.
+- No es corregible con cambios en nginx, caché, timeouts, ni en la lógica del resolver o del backend: es un bloqueo aplicado por YouTube según la IP de salida que sirve los `videoplayback`.
+- **Fix real (pendiente, requiere contratar un proxy residencial):** hacer que la IP que firma/extrae la URL (yt-dlp en el resolver) y la IP que efectivamente descarga los segmentos (`piped-proxy`) sean la misma IP residencial:
+  - `RESOLVER_PROXY` en `piped-resolver` (ya soportado en `config.py`).
+  - `PROXY` / `PROXY_USER` / `PROXY_PASS` en `piped-proxy` (soportado nativamente por el binario Rust vía `reqwest::Proxy`).
+  - Ya hay placeholders comentados para ambas variables en `docker-compose_all_resolution.yml`, listos para activar en cuanto se disponga de un proxy residencial.
+- Se probó fijar `YTDLP_PLAYER_CLIENTS` (`android,ios` y `android_creator,ios,web`) para evitar el cliente `ANDROID_VR` (el que dispara el 403) y **ambas combinaciones rompen toda la extracción** (502 en `/streams` para cualquier vídeo). Conclusión: dejar `YTDLP_PLAYER_CLIENTS` vacío (por defecto de yt-dlp) es lo único que funciona hoy; no volver a tocar esta variable sin pedirlo explícitamente.
+
+### Comparación con el stack de la raíz
+
+- El stack de la raíz (`docker-compose.yml` en la raíz del repo, sin `piped-bgutil`/`piped-resolver`) es Piped estándar. Sin PO Tokens, el backend solo consigue extraer un conjunto muy reducido de itags, por eso apenas hay opciones de resolución.
+- El usuario decidió explícitamente **no migrar el stack de la raíz** a esta arquitectura (ver decisión del 2026-08-26): "dejamoslo como está". No proponer ni aplicar ese cambio de nuevo sin que lo pida.
+- El corte a mitad de vídeos largos ocurre en **ambos** stacks porque comparten la misma imagen `1337kavin/piped-proxy`; no es un problema exclusivo de `all_resolution`.
+
+### Resumen para diagnósticos futuros
+
+| Síntoma | Estado | Causa | Fix disponible |
+|---|---|---|---|
+| Selección de resolución limitada | Resuelto en `all_resolution` | Falta PO Token provider en el stack raíz | Ya implementado aquí (bgutil + resolver) |
+| Algunos VOD no reproducen | Sin resolver, pendiente | No aislado aún | Diagnosticar caso a caso con logs del resolver |
+| Directos (lives) fallan a veces | Parcial, pendiente | Cobertura incompleta de HLS/`/relay` o PO Token inconsistente en directos | Diagnosticar con Network tab + logs en el momento del fallo |
+| Vídeos largos se cortan a mitad | Sin resolver, causa confirmada | 403 por reputación de IP (VPS/CGNAT) | Proxy de salida residencial (`RESOLVER_PROXY` + `PROXY` en `piped-proxy`) |
+
+---
+
 ## 28. Diagnóstico
 
 ### `proxyUrl = ''`
