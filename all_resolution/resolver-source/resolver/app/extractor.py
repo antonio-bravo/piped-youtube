@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from urllib.parse import quote
 
 from yt_dlp import YoutubeDL
 
@@ -79,7 +80,15 @@ def extract_streams(config: Config, video_id: str) -> dict[str, Any]:
     response = map_streams_response(
         info, proxy_url=config.proxy_url, secret=config.proxy_hash_secret
     )
-    if not response["videoStreams"] and not response["audioStreams"]:
+    if response["hls"]:
+        # Rewrite the raw googlevideo master playlist URL through /relay so
+        # the sub-playlists and segments it references get proxied too
+        # (otherwise the browser hits googlevideo directly and gets CORS'd).
+        if config.resolver_public_url:
+            response["hls"] = (
+                f"{config.resolver_public_url}/relay?url={quote(response['hls'], safe='')}"
+            )
+    if not response["videoStreams"] and not response["audioStreams"] and not response["hls"]:
         raise ExtractionError(
             "no adaptive formats returned — po_token or extractor failure"
         )

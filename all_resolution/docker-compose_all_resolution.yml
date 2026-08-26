@@ -62,6 +62,10 @@ services:
       # que utiliza Piped.
       PROXY_URL: "http://pipedproxy.home:18080"
 
+      # Base pública para reescribir manifiestos HLS de directos (/relay).
+      # Debe ser accesible desde el navegador que usa Piped.
+      RESOLVER_PUBLIC_URL: "http://pipedapi.home:18080"
+
       # Configuración del resolver
       CACHE_TTL: "3600"
       CACHE_MAXSIZE: "512"
@@ -69,6 +73,20 @@ services:
 
       # BGUTIL HTTP POT provider
       BGUTIL_BASE_URL: "http://piped-bgutil:4416"
+
+      # OPCIONAL/EXPERIMENTAL: DESCARTADO. Se probó "android,ios" y
+      # "android_creator,ios,web" para evitar el cliente ANDROID_VR (el que
+      # causaba el 403 mid-stream) y AMBAS combinaciones rompen la
+      # extracción por completo (502 en /streams para TODO). No fijar este
+      # valor: dejar vacío para que yt-dlp elija su set por defecto.
+      # YTDLP_PLAYER_CLIENTS: ""
+
+      # OPCIONAL: si YouTube empieza a devolver 403 a mitad de reproduccion
+      # (habitual detras de VPS/tunel/CGNAT), yt-dlp debe extraer a traves de
+      # un proxy de salida residencial. Debe coincidir con el PROXY de
+      # piped-proxy de abajo, para que la IP "ip=" firmada en la URL sea la
+      # misma que la que descarga los segmentos.
+      # RESOLVER_PROXY: "http://usuario:password@mi-proxy-residencial:puerto"
 
     depends_on:
       - piped-bgutil
@@ -109,6 +127,13 @@ services:
 
     environment:
       UDS: "0"
+
+      # OPCIONAL: debe ser el MISMO proxy residencial que RESOLVER_PROXY de
+      # piped-resolver (ver arriba), para que la IP que sirve los segmentos
+      # coincida con la que YouTube autorizó al firmar la URL.
+      # PROXY: "http://usuario:password@mi-proxy-residencial:puerto"
+      # PROXY_USER: "usuario"
+      # PROXY_PASS: "password"
 
     networks:
       - piped

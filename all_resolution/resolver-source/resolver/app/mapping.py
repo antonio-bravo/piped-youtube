@@ -168,6 +168,23 @@ def _map_chapters(info: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def _hls_master_url(info: dict[str, Any]) -> str | None:
+    """Best-effort HLS master playlist URL for livestreams.
+
+    yt-dlp drops live formats from the adaptive video/audio pairing (see
+    ``_SKIP_PROTOCOLS``), so livestreams need the master ``.m3u8`` surfaced
+    separately for the frontend's hls.js player.
+    """
+    manifest_url = info.get("manifest_url")
+    if manifest_url:
+        return manifest_url
+    for fmt in info.get("formats", []):
+        proto = fmt.get("protocol", "") or ""
+        if proto.startswith("m3u8") and fmt.get("manifest_url"):
+            return fmt["manifest_url"]
+    return None
+
+
 def _content_length(fmt: dict[str, Any]) -> int:
     val = fmt.get("filesize") or fmt.get("filesize_approx")
     if val:
@@ -290,7 +307,14 @@ def map_streams_response(
         "views": int(info.get("view_count") or 0),
         "likes": int(info.get("like_count") or 0),
         "dislikes": -1,
-        "hls": None,
+        # Raw googlevideo master playlist URL — only for genuine livestreams.
+        # Many VOD videos also carry an HLS format (yt-dlp keeps it around for
+        # mobile clients); populating "hls" for those makes the Piped frontend
+        # prefer HLS playback over the working DASH/progressive streams, so it
+        # must stay None unless yt-dlp actually flagged this as live.
+        # The caller (extractor.py) rewrites this through the relay endpoint
+        # so segments are proxied too.
+        "hls": _hls_master_url(info) if info.get("is_live") else None,
         "dash": None,
         "lbryId": None,
         "livestream": bool(info.get("is_live")),

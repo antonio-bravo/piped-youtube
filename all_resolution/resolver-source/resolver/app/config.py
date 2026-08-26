@@ -33,6 +33,11 @@ class Config:
     # web frontend can proxy thumbnails/streams. Empty = frontend uses direct
     # URLs. Set to the site's ytproxy host (e.g. https://tubeproxy.example.com).
     proxy_url: str
+    # Public base URL the browser uses to reach this resolver (e.g.
+    # http://pipedapi.home:18080). Used to build /relay URLs for livestream
+    # HLS manifests so segment/sub-playlist URIs are rewritten through it too.
+    # Empty = livestreams expose the raw (unproxied) googlevideo manifest URL.
+    resolver_public_url: str
     # Shared secret for signing proxied stream URLs (piped-proxy `qhash`). When
     # the proxy enforces HASH_SECRET, unsigned URLs are rejected (403); this
     # must equal the proxy's secret. Empty = emit unsigned URLs (proxy must run
@@ -68,6 +73,7 @@ class Config:
             player_clients=_split_csv(os.getenv("YTDLP_PLAYER_CLIENTS", "")),
             proxy=os.getenv("RESOLVER_PROXY") or None,
             proxy_url=(os.getenv("PROXY_URL", "") or "").rstrip("/"),
+            resolver_public_url=(os.getenv("RESOLVER_PUBLIC_URL", "") or "").rstrip("/"),
             proxy_hash_secret=Config._read_proxy_secret(),
             cache_ttl=int(os.getenv("CACHE_TTL", "3600")),
             cache_maxsize=int(os.getenv("CACHE_MAXSIZE", "512")),

@@ -38,7 +38,14 @@ services:
     networks:
       - piped
 
+  piped-bg-helper:
+    image: 1337kavin/bg-helper-server:latest
+    container_name: piped-bg-helper
+    restart: unless-stopped
 
+    networks:
+      - piped
+      
   piped-proxy:
     image: 1337kavin/piped-proxy:latest
     container_name: piped-proxy
