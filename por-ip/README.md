@@ -37,8 +37,7 @@ Mantendremos exactamente:
 │   ├── config.properties
 │   ├── nginx.conf
 │   ├── pipedfrontend.conf
-│   ├── pipedapi.conf
-│   └── pipedproxy.conf
+│   └── ytproxy.conf
 │
 └── data/
     └── postgres/
@@ -61,13 +60,19 @@ services:
     environment:
       POSTGRES_DB: piped
       POSTGRES_USER: piped
-      POSTGRES_PASSWORD: Piped-QNAP-2026-ChangeMe
+      POSTGRES_PASSWORD: Piped-QNAP-xxxx-ChangeMe
 
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - /share/Container/piped/data/postgres:/var/lib/postgresql/data
 
     networks:
       - piped
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U piped -d piped"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 
   piped-backend:
@@ -76,18 +81,23 @@ services:
     restart: unless-stopped
 
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
     volumes:
-      - ./config/config.properties:/app/config.properties:ro
-
-    expose:
-      - "8080"
+      - /share/Container/piped/config/config.properties:/app/config.properties:ro
 
     networks:
       - piped
 
+  piped-bg-helper:
+    image: 1337kavin/bg-helper-server:latest
+    container_name: piped-bg-helper
+    restart: unless-stopped
 
+    networks:
+      - piped
+      
   piped-proxy:
     image: 1337kavin/piped-proxy:latest
     container_name: piped-proxy
@@ -95,9 +105,6 @@ services:
 
     environment:
       UDS: "0"
-
-    expose:
-      - "8080"
 
     networks:
       - piped
@@ -108,15 +115,12 @@ services:
     container_name: piped-frontend
     restart: unless-stopped
 
-    depends_on:
-      - piped-backend
-
     environment:
-      BACKEND_HOSTNAME: 125.125.125.125:18080/api
+      BACKEND_HOSTNAME: pipedapi.kavin.rocks
       HTTP_MODE: http
 
-    expose:
-      - "80"
+    depends_on:
+      - piped-backend
 
     networks:
       - piped
@@ -136,11 +140,9 @@ services:
       - "18080:80"
 
     volumes:
-      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./config/pipedfrontend.conf:/etc/nginx/conf.d/pipedfrontend.conf:ro
-      - ./config/pipedapi.conf:/etc/nginx/conf.d/pipedapi.conf:ro
-      - ./config/pipedproxy.conf:/etc/nginx/conf.d/pipedproxy.conf:ro
-      - ./config/ytproxy.conf:/etc/nginx/snippets/ytproxy.conf:ro
+      - /share/Container/piped/config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /share/Container/piped/config/pipedfrontend.conf:/etc/nginx/conf.d/pipedfrontend.conf:ro
+      - /share/Container/piped/config/ytproxy.conf:/etc/nginx/snippets/ytproxy.conf:ro
 
     networks:
       - piped
@@ -199,140 +201,41 @@ Todo el tráfico entre contenedores es TCP.
 Aquí está el cambio fundamental respecto a tu configuración anterior.
 
 ```properties
-# ============================================================
-# PIPED BACKEND
-# ============================================================
-
 PORT:8080
 HTTP_WORKERS:2
 
-
-# ============================================================
-# URLs PUBLICAS DE ESTA INSTANCIA
-# ============================================================
-
-# Proxy de vídeo
 PROXY_PART:http://125.125.125.125:18080/proxy
-
-# API pública
 API_URL:http://125.125.125.125:18080/api
-
-# Frontend
 FRONTEND_URL:http://125.125.125.125:18080
-
-
-# ============================================================
-# CAPTCHA
-# ============================================================
-
-# CAPTCHA desactivado/no configurado
-# CAPTCHA_BASE_URL:https://api.capmonster.cloud/
-# CAPTCHA_API_KEY:INSERT_HERE
-
-
-# ============================================================
-# REGISTRO
-# ============================================================
-
-# false = registro ACTIVADO
-DISABLE_REGISTRATION:false
-
-
-# ============================================================
-# CUENTAS / FEEDS
-# ============================================================
-
-FEED_RETENTION:30
-
-SUBSCRIPTIONS_EXPIRY:30
-
-
-# ============================================================
-# RENDIMIENTO
-# ============================================================
-
-DISABLE_TIMERS:false
-
-
-# ============================================================
-# COMPROMISED PASSWORD CHECK
-# ============================================================
 
 COMPROMISED_PASSWORD_CHECK:true
 
+DISABLE_REGISTRATION:false
 
-# ============================================================
-# RYD - RETURN YOUTUBE DISLIKE
-# ============================================================
+FEED_RETENTION:30
+
+DISABLE_TIMERS:true
 
 RYD_PROXY_URL:https://ryd-proxy.kavin.rocks
-
 DISABLE_RYD:false
-
-
-# ============================================================
-# SPONSORBLOCK
-# ============================================================
 
 SPONSORBLOCK_SERVERS:https://sponsor.ajay.app,https://sponsorblock.kavin.rocks
 
-
-# ============================================================
-# LBRY
-# ============================================================
-
 DISABLE_LBRY:false
 
-
-# ============================================================
-# CONSENT COOKIE
-# ============================================================
+SUBSCRIPTIONS_EXPIRY:30
 
 CONSENT_COOKIE:true
 
-
-# ============================================================
-# MATRIX
-# ============================================================
+DISABLE_SERVER:false
 
 MATRIX_SERVER:https://matrix-client.matrix.org
-
-
-# ============================================================
-# BG HELPER
-# ============================================================
-
-# No se utiliza en esta configuración
-# BG_HELPER_URL:http://bg-helper:3000
-
-
-# ============================================================
-# S3
-# ============================================================
-
-#S3_ENDPOINT:INSERT_HERE
-#S3_ACCESS_KEY:INSERT_HERE
-#S3_SECRET_KEY:INSERT_HERE
-#S3_BUCKET:INSERT_HERE
-
-
-# ============================================================
-# HIBERNATE / POSTGRESQL
-# ============================================================
 
 hibernate.connection.url:jdbc:postgresql://postgres:5432/piped
 hibernate.connection.driver_class:org.postgresql.Driver
 hibernate.dialect:org.hibernate.dialect.PostgreSQLDialect
 hibernate.connection.username:piped
-hibernate.connection.password:Piped-QNAP-2026-ChangeMe
-
-
-# ============================================================
-# FRONTEND
-# ============================================================
-
-#frontend.statusPageUrl:
-#frontend.donationUrl:
+hibernate.connection.password:Piped-QNAP-xxxx-ChangeMe
 ```
 
 La configuración oficial actual de Piped utiliza precisamente `API_URL`, `FRONTEND_URL`, `PROXY_PART` y la conexión PostgreSQL mediante `hibernate.connection.url`; además, `DISABLE_REGISTRATION:false` mantiene el registro habilitado. ([GitHub][2])
@@ -349,25 +252,11 @@ events {
 }
 
 http {
-
-    include       /etc/nginx/mime.types;
-    default_type  application/octet-stream;
-
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
     sendfile on;
-    tcp_nopush on;
     tcp_nodelay on;
-
     keepalive_timeout 65;
-
-    client_max_body_size 20m;
-
-    # Logs
-    access_log /var/log/nginx/access.log;
-    error_log  /var/log/nginx/error.log warn;
-
-    # DNS interno de Docker
-    resolver 127.0.0.11 valid=30s;
-
     include /etc/nginx/conf.d/*.conf;
 }
 ```
@@ -379,28 +268,94 @@ http {
 Aquí está el frontend.
 
 ```nginx
+# ==============================================================================
+# Configuración unificada de Nginx para Piped bajo IP única (puerto 18080)
+# Frontend en / | API Backend en /api/ | Video Proxy en /proxy/
+# ==============================================================================
+
+upstream piped_frontend {
+    server piped-frontend:80;
+}
+
+upstream piped_backend {
+    server piped-backend:8080;
+}
+
+upstream piped_proxy {
+    server piped-proxy:8080;
+}
+
 server {
-
     listen 80 default_server;
-    listen [::]:80 default_server;
-
     server_name _;
 
-    location / {
+    # client_max_body_size 50M;
 
-        proxy_pass http://piped-frontend:80;
+    # 1. Piped Video Proxy - Streams de vídeo/audio y manifiestos
+    location ~ ^/proxy(/videoplayback|/api/v4/|/api/manifest/) {
+        rewrite ^/proxy/(.*)$ /$1 break;
+        include /etc/nginx/snippets/ytproxy.conf;
+        add_header Cache-Control private always;
+        proxy_hide_header Access-Control-Allow-Origin;
+    }
 
+    # 2. Piped Video Proxy - Rutas directas para segmentos relativos de manifiestos HLS/DASH
+    location ~ ^(/videoplayback|/api/manifest/) {
+        include /etc/nginx/snippets/ytproxy.conf;
+        add_header Cache-Control private always;
+        proxy_hide_header Access-Control-Allow-Origin;
+    }
+
+    # 3. Piped Video Proxy - Miniaturas, avatares e imágenes estáticas
+    location ~ ^/proxy(/.*)?$ {
+        rewrite ^/proxy/?(.*)$ /$1 break;
+        include /etc/nginx/snippets/ytproxy.conf;
+        add_header Cache-Control "public, max-age=604800";
+        proxy_hide_header Access-Control-Allow-Origin;
+    }
+
+    # 4. Piped API Backend (/api/ redirige a la raíz del backend eliminando el prefijo)
+    location /api/ {
+        proxy_pass http://piped_backend/;
         proxy_http_version 1.1;
-
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-
         proxy_set_header Connection "";
 
-        proxy_read_timeout 60s;
-        proxy_send_timeout 60s;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    location = /api {
+        return 301 /api/;
+    }
+
+    # 5. Piped Frontend - Aplicación Web UI (SPA) con reemplazo dinámico en tiempo real
+    location / {
+        proxy_pass http://piped_frontend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
+
+        # Desactivar compresión interna entre Nginx y el contenedor para que sub_filter pueda operar
+        proxy_set_header Accept-Encoding "";
+
+        # Reescritura al vuelo dinámica: inyecta la base actual ($http_host) en los scripts JS
+        sub_filter_types text/html application/javascript text/javascript text/css;
+        sub_filter_once off;
+        sub_filter 'https://pipedapi.kavin.rocks' '$scheme://$http_host/api';
+        sub_filter 'http://pipedapi.kavin.rocks' '$scheme://$http_host/api';
+        sub_filter 'pipedapi.kavin.rocks' '$http_host/api';
+        sub_filter 'pipedapi.home:18080' '$http_host/api';
+        sub_filter 'https://pipedproxy.kavin.rocks' '$scheme://$http_host/proxy';
+        sub_filter 'http://pipedproxy.kavin.rocks' '$scheme://$http_host/proxy';
+        sub_filter 'pipedproxy.kavin.rocks' '$http_host/proxy';
+        sub_filter 'pipedproxy.home:18080' '$http_host/proxy';
     }
 }
 ```
@@ -415,123 +370,36 @@ entra aquí.
 
 ---
 
-# 5. `config/pipedapi.conf`
-
-Ahora viene `/api/`.
+# 5. `ytproxy.conf` y comunicación TCP
 
 ```nginx
-server {
-
-    listen 80;
-
-    server_name _;
-
-    location ^~ /api/ {
-
-        proxy_pass http://piped-backend:8080/;
-
-        proxy_http_version 1.1;
-
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        proxy_set_header Connection "";
-
-        proxy_read_timeout 120s;
-        proxy_send_timeout 120s;
-
-        proxy_buffering off;
-
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
-        add_header Access-Control-Allow-Headers "*" always;
-
-        if ($request_method = OPTIONS) {
-            return 204;
-        }
-    }
+add_header Access-Control-Allow-Origin *;
+add_header Access-Control-Allow-Headers *;
+if ($request_method = OPTIONS) {
+    return 200;
 }
+proxy_buffering on;
+proxy_set_header Host $arg_host;
+proxy_set_header X-Forwarded-For "";
+proxy_set_header CF-Connecting-IP "";
+proxy_hide_header "alt-svc";
+sendfile on;
+sendfile_max_chunk 512k;
+tcp_nopush on;
+aio threads=default;
+aio_write on;
+directio 2m;
+proxy_hide_header Cache-Control;
+proxy_hide_header etag;
+proxy_http_version 1.1;
+proxy_set_header Connection keep-alive;
+proxy_max_temp_file_size 0;
+access_log off;
+proxy_read_timeout 3600s;
+proxy_send_timeout 3600s;
+proxy_connect_timeout 60s;
+proxy_pass http://piped_proxy;
 ```
-
-### Importante
-
-Esta línea:
-
-```nginx
-proxy_pass http://piped-backend:8080/;
-```
-
-tiene la `/` final.
-
-Eso hace:
-
-```text
-/api/config
-      ↓
-piped-backend:8080/config
-```
-
-Es exactamente lo que queremos.
-
-El backend sigue funcionando internamente como siempre:
-
-```text
-piped-backend:8080/config
-```
-
-pero externamente lo presentamos como:
-
-```text
-125.125.125.125:18080/api/config
-```
-
----
-
-# 6. `config/pipedproxy.conf`
-
-Para el proxy:
-
-```nginx
-server {
-
-    listen 80;
-
-    server_name _;
-
-    location ^~ /proxy/ {
-
-        proxy_pass http://piped-proxy:8080/;
-
-        proxy_http_version 1.1;
-
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        proxy_set_header Connection "keep-alive";
-
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-
-        proxy_buffering off;
-
-        # Cabeceras necesarias para el proxy de vídeo
-        proxy_set_header X-Forwarded-For "";
-        proxy_set_header CF-Connecting-IP "";
-
-        add_header Alt-Svc "" always;
-        add_header Cache-Control "" always;
-        add_header ETag "" always;
-    }
-}
-```
-
----
-
-# 7. `ytproxy.conf` y comunicación TCP
 
 En tu configuración anterior sí tenía sentido porque el diseño oficial de `Piped-Docker` utiliza un volumen para comunicar NGINX con `piped-proxy` mediante socket Unix. El propio proyecto muestra esa configuración con `ytproxy.conf` y el volumen `piped-proxy`. ([GitHub][3])
 
