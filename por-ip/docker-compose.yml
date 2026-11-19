@@ -31,6 +31,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      piped-bg-helper:
+        condition: service_started        
 
     volumes:
       - /share/Container/piped/config/config.properties:/app/config.properties:ro
