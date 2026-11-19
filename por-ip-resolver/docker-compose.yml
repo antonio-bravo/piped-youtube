@@ -34,6 +34,7 @@ services:
 
   piped-resolver:
     image: ghcr.io/antonio-bravo/piped-youtube/piped-resolver:latest
+    pull_policy: always
     container_name: piped-resolver
     restart: unless-stopped
 
