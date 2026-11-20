@@ -15,8 +15,8 @@ on:
       - 'all_resolution/resolver-source/resolver/**'
       - '.github/workflows/build-resolver.yml'
   schedule:
-    # Ejecutar todos los domingos a las 03:00 UTC para mantener yt-dlp actualizado automáticamente
-    - cron: '0 3 * * 0'
+    # Ejecutar todos los sábados a las 03:00 UTC para mantener yt-dlp actualizado automáticamente
+    - cron: '0 3 * * 6'
 
 permissions:
   contents: read

@@ -37,6 +37,8 @@ services:
     pull_policy: always
     container_name: piped-resolver
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
 
     environment:
       RESOLVER_HOST: "0.0.0.0"
@@ -130,6 +132,20 @@ services:
     networks:
       - piped
 
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: piped-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TZ=Europe/Madrid
+      - WATCHTOWER_LABEL_ENABLE=true
+      - WATCHTOWER_CLEANUP=true
+      # Ejecuta la comprobación los domingos a las 06:30 hora peninsular (05:30 UTC)
+      - WATCHTOWER_SCHEDULE=0 30 6 * * 0
+    networks:
+      - piped
 
 networks:
   piped:
