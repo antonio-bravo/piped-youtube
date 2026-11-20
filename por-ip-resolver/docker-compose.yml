@@ -98,6 +98,7 @@ services:
     image: 1337kavin/piped-frontend:latest
     container_name: piped-frontend
     restart: unless-stopped
+    user: root
 
     environment:
       BACKEND_HOSTNAME: pipedapi.kavin.rocks
